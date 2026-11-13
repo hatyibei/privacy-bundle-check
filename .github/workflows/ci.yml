@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 24]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run fixtures
+      - name: Check dist/ is up to date
+        run: git diff --exit-code -- dist
+      - name: Run bundled action entry locally (expect pass)
+        env:
+          INPUT_PATH: fixtures/app-ok
+          INPUT_MODE: bundle
+          INPUT_STRICT: "false"
+          GITHUB_OUTPUT: ${{ runner.temp }}/pmc-output.txt
+        run: |
+          node dist/index.cjs
+          grep -qx 'exit-code=0' "$GITHUB_OUTPUT"
+      - name: Run bundled action entry locally (expect missing manifest)
+        env:
+          INPUT_PATH: fixtures/app-missing-manifest
+          INPUT_MODE: bundle
+          INPUT_STRICT: "false"
+          GITHUB_OUTPUT: ${{ runner.temp }}/pmc-output-fail.txt
+        run: |
+          set +e
+          node dist/index.cjs
+          code=$?
+          set -e
+          test "$code" -eq 1
+          grep -qx 'exit-code=1' "$GITHUB_OUTPUT"
