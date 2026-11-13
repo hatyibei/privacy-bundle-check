@@ -1,0 +1,8 @@
+privacy-bundle-check
+Copyright 2026 privacy-bundle-check contributors
+
+This product includes software developed by privacy-bundle-check contributors.
+Licensed under the Apache License, Version 2.0.
+
+This product bundles the following third-party software in dist/:
+- plist (MIT)

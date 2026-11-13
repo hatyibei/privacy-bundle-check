@@ -1,0 +1,55 @@
+{
+  "name": "privacy-bundle-check",
+  "version": "0.1.0",
+  "description": "Check PrivacyInfo.xcprivacy in built .app / .xcarchive bundles in CI: missing or duplicate manifests, and Required Reason API symbols without an approved reason.",
+  "type": "module",
+  "bin": {
+    "privacy-bundle-check": "./dist/cli.cjs"
+  },
+  "scripts": {
+    "build": "npm run build:cli && npm run build:action",
+    "build:cli": "esbuild src/cli.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/cli.cjs --banner:js=\"#!/usr/bin/env node\"",
+    "build:action": "esbuild src/action.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/index.cjs",
+    "test": "node --import tsx --test test/*.test.ts",
+    "start": "node dist/cli.cjs",
+    "typecheck": "tsc --noEmit",
+    "fixtures": "bash scripts/fixtures.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "ios",
+    "privacy-manifest",
+    "privacyinfo",
+    "xcprivacy",
+    "required-reason-api",
+    "github-action",
+    "ci"
+  ],
+  "files": [
+    "dist/cli.cjs",
+    "dist/index.cjs",
+    "action.yml",
+    "README.md",
+    "README.ja.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatyibei/privacy-bundle-check.git"
+  },
+  "homepage": "https://github.com/hatyibei/privacy-bundle-check#readme",
+  "bugs": {
+    "url": "https://github.com/hatyibei/privacy-bundle-check/issues"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.25.12",
+    "plist": "^5.1.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

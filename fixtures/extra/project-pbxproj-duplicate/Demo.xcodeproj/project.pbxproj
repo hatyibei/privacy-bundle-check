@@ -1,0 +1,86 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AA0000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* PrivacyInfo.xcprivacy */; };
+		AA0000000000000000000002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000012 /* PrivacyInfo.xcprivacy */; };
+		AA0000000000000000000003 /* AppMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000013 /* AppMain.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AA0000000000000000000011 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Resources/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		AA0000000000000000000012 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Legacy/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		AA0000000000000000000013 /* AppMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMain.swift; sourceTree = "<group>"; };
+		AA0000000000000000000014 /* Demo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Demo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		AA0000000000000000000021 = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000022 /* Demo */,
+			);
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000022 /* Demo */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000011 /* PrivacyInfo.xcprivacy */,
+				AA0000000000000000000012 /* PrivacyInfo.xcprivacy */,
+				AA0000000000000000000013 /* AppMain.swift */,
+			);
+			path = Demo;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AA0000000000000000000031 /* Demo */ = {
+			isa = PBXNativeTarget;
+			buildPhases = (
+				AA0000000000000000000041 /* Sources */,
+				AA0000000000000000000042 /* Resources */,
+			);
+			name = Demo;
+			productName = Demo;
+			productReference = AA0000000000000000000014 /* Demo.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA0000000000000000000051 /* Project object */ = {
+			isa = PBXProject;
+			mainGroup = AA0000000000000000000021;
+			targets = (
+				AA0000000000000000000031 /* Demo */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AA0000000000000000000042 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+				AA0000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */,
+				AA0000000000000000000002 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AA0000000000000000000041 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				AA0000000000000000000003 /* AppMain.swift in Sources */,
+			);
+		};
+/* End PBXSourcesBuildPhase section */
+	};
+	rootObject = AA0000000000000000000051 /* Project object */;
+}

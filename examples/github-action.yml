@@ -1,0 +1,7 @@
+# Example: scan a built .xcarchive in CI.
+# Build the app first, then point `path` at the archive or the .app inside it.
+- uses: hatyibei/privacy-bundle-check@v1
+  with:
+    path: build/MyApp.xcarchive
+    mode: bundle
+    strict: "false"
