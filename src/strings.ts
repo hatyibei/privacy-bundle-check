@@ -110,6 +110,24 @@ export function nmOf(file: string, tools: Tools): string | null {
   return r.stdout;
 }
 
+/**
+ * nm 既定形式（llvm-nm / GNU / BSD）の行から未定義記号名だけを抜く。
+ * 例: "                 U _stat" / "                 U _stat$INODE64"
+ * 定義済み（T/t/D/d/S/s など）は含めない。弱未定義 `w` は含める。
+ */
+export function parseNmUndefined(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$/);
+    if (!m) continue;
+    const type = m[1]!;
+    if (type === "U" || type === "w") out.push(m[2]!);
+  }
+  return out;
+}
+
 const MACHO_MAGICS = new Set([
   "feedface", // MH_MAGIC (32bit BE)
   "cefaedfe", // MH_CIGAM (32bit LE)

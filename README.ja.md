@@ -141,6 +141,7 @@ XML / JSON / バイナリ（`bplist00`）の plist を読みます。
 - `creationDate` / `modificationDate` は `--mode project` だけで使います。バイナリの strings には短すぎます。
 - バイナリでは `NSUserDefaults` が確定、`UserDefaults` 単体は参考ヒット（`possible_undeclared_api`、warning）です。Swift のマングルや無関係な文字列があり得るためです。プロジェクトモードでは `UserDefaults` も確定です。
 - バイナリの一致は識別子の境界を見ます。`stat` は `status` / `statistics` / `os_stat` / `stat_foo` には当たりません。先頭の `_`（`_stat`）、`$INODE64` や `@plt` のような接尾辞、Swift マングルの長さ接頭辞（`12systemUptime`）は許します。
+- `nm` または `llvm-nm` が Mach-O を読めたときは、確定ヒットは未定義記号（import。`_stat`、`_stat$INODE64`、`_OBJC_CLASS_$_NSUserDefaults` など）か、`__TEXT,__objc_methname` セクションのセレクタ（`systemUptime`、`activeInputModes` など）に限る。strings にしか出ないもの、定義済みで import していない記号は参考ヒット（weak）にする。`nm` が読めないときは、従来の strings 判定に退避して見逃しを増やさない。
 
 ### 不足と未宣言
 
@@ -156,7 +157,7 @@ Apple のドキュメントは、Required Reason API を使う実行ファイル
 
 ## 制限
 
-- Linux では本物の Mach-O を `nm` が読めないことがあります。内蔵の strings 抽出は動きます。同梱のフィクスチャはテキストの疑似バイナリで、本物の Mach-O ではありません。
+- Linux では GNU `nm` が本物の Mach-O を読めないことがあります。その場合は内蔵の strings 抽出と、従来の strings 判定に退避します。同梱のフィクスチャはテキストの疑似バイナリで、本物の Mach-O ではありません。
 - リンクされたシステムライブラリ由来の記号と、アプリ自身の呼び出しを完全には区別できません。
 - `--mode project` はコメントや未使用コードも拾い得ます。
 - このツールを通っても、App Store に通る保証はありません。Apple の API と理由の一覧は変わり得ます。照合した日付は [docs/catalog.md](docs/catalog.md) に書いてあります。

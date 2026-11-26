@@ -3,8 +3,9 @@ import { basename, dirname, extname, relative, sep } from "node:path";
 import { walk, isXcprivacyName } from "./fswalk.ts";
 import { parseManifestFile } from "./manifest.ts";
 import { CATALOG, categoriesForSymbol, firstUndeclaredCategory, isSymbolSatisfied, shortName } from "./required-reason-apis.ts";
-import { hasMachOMagic, nmOf, stringsOf, type Tools } from "./strings.ts";
-import { binaryMatchers, findSymbols, recordHit } from "./symbols.ts";
+import { extractObjcMethnamesFromFile } from "./macho.ts";
+import { hasMachOMagic, nmOf, parseNmUndefined, stringsOf, type Tools } from "./strings.ts";
+import { binaryMatchers, collectBinaryHits } from "./symbols.ts";
 import type { BundleReport, Issue, ManifestInfo, SymbolHit } from "./types.ts";
 import type { Root } from "./discover.ts";
 
@@ -137,14 +138,14 @@ export function scanBundleRoot(root: Root, display: (p: string) => string, tools
     // バイナリスキャン
     const hitMap = new Map<string, SymbolHit>();
     for (const bin of b.binaries) {
-      const sources: { text: string; via: string }[] = [stringsOf(bin, tools)];
-      const nm = nmOf(bin, tools);
-      if (nm) sources.push({ text: nm, via: "nm" });
-      for (const src of sources) {
-        for (const m of findSymbols(src.text, matchers)) {
-          recordHit(hitMap, m.symbol, m.confidence, src.via, display(bin));
-        }
-      }
+      const str = stringsOf(bin, tools);
+      const nmText = nmOf(bin, tools);
+      collectBinaryHits(hitMap, display(bin), matchers, {
+        stringsText: str.text,
+        stringsVia: str.via,
+        nmUndefinedText: nmText !== null ? parseNmUndefined(nmText).join("\n") : null,
+        methnameText: nmText !== null ? extractObjcMethnamesFromFile(bin).join("\n") : "",
+      });
     }
     const hits = [...hitMap.values()];
     issues.push(...judge(target, b.main, b.rootManifests.length > 0, hits, declared, b.kind));

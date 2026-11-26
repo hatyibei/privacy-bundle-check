@@ -1,6 +1,6 @@
 {
   "name": "privacy-bundle-check",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Check PrivacyInfo.xcprivacy in built .app / .xcarchive bundles in CI: missing or duplicate manifests, and Required Reason API symbols without an approved reason.",
   "type": "module",
   "bin": {

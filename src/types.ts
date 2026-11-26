@@ -34,7 +34,7 @@ export interface SymbolHit {
   /** All official categories that list this symbol (FileTimestamp+DiskSpace for getattrlist, etc.) */
   categories: Category[];
   confidence: Confidence;
-  /** どこで見つけたか: strings / nm / source */
+  /** どこで見つけたか: strings / builtin-strings / nm / objc_methname / source */
   via: string[];
   /** ファイル（入力ルートからの相対）。ソースの場合は file:line */
   locations: string[];

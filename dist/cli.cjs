@@ -10668,7 +10668,7 @@ var import_node_util = require("node:util");
 
 // src/scan.ts
 var import_node_path5 = require("node:path");
-var import_node_fs6 = require("node:fs");
+var import_node_fs7 = require("node:fs");
 
 // src/discover.ts
 var import_node_fs = require("node:fs");
@@ -11558,9 +11558,173 @@ function validateManifest(root, displayPath) {
   return { ok: true, declared, issues };
 }
 
+// src/macho.ts
+var import_node_fs4 = require("node:fs");
+var MH_MAGIC = 4277009102;
+var MH_CIGAM = 3472551422;
+var MH_MAGIC_64 = 4277009103;
+var MH_CIGAM_64 = 3489328638;
+var FAT_MAGIC = 3405691582;
+var FAT_CIGAM = 3199925962;
+var FAT_MAGIC_64 = 3405691583;
+var FAT_CIGAM_64 = 3216703178;
+var LC_SEGMENT = 1;
+var LC_SEGMENT_64 = 25;
+function u32(buf, off, le) {
+  if (off + 4 > buf.length) return 0;
+  const v = new DataView(buf.buffer, buf.byteOffset + off, 4);
+  return le ? v.getUint32(0, true) : v.getUint32(0, false);
+}
+function u64(buf, off, le) {
+  if (off + 8 > buf.length) return 0;
+  const v = new DataView(buf.buffer, buf.byteOffset + off, 8);
+  const x = le ? v.getBigUint64(0, true) : v.getBigUint64(0, false);
+  const n = Number(x);
+  return Number.isSafeInteger(n) ? n : 0;
+}
+function cstr16(buf, off) {
+  if (off + 16 > buf.length) return "";
+  const slice = buf.subarray(off, off + 16);
+  const end = slice.indexOf(0);
+  return Buffer.from(slice.subarray(0, end < 0 ? 16 : end)).toString("ascii");
+}
+function splitCStrings(buf) {
+  const out = [];
+  let start = 0;
+  for (let i = 0; i <= buf.length; i++) {
+    if (i === buf.length || buf[i] === 0) {
+      if (i > start) out.push(Buffer.from(buf.subarray(start, i)).toString("utf8"));
+      start = i + 1;
+    }
+  }
+  return out;
+}
+function parseThin(buf, start, end) {
+  if (end > buf.length) end = buf.length;
+  if (start < 0 || start + 4 > end) return [];
+  const view = buf.subarray(start, end);
+  const magic = u32(view, 0, false);
+  let le;
+  let is64;
+  if (magic === MH_MAGIC) {
+    le = false;
+    is64 = false;
+  } else if (magic === MH_CIGAM) {
+    le = true;
+    is64 = false;
+  } else if (magic === MH_MAGIC_64) {
+    le = false;
+    is64 = true;
+  } else if (magic === MH_CIGAM_64) {
+    le = true;
+    is64 = true;
+  } else {
+    return [];
+  }
+  const headerSize = is64 ? 32 : 28;
+  if (view.length < headerSize) return [];
+  const ncmds = u32(view, 16, le);
+  const sizeofcmds = u32(view, 20, le);
+  if (ncmds < 0 || ncmds > 65536) return [];
+  if (headerSize + sizeofcmds > view.length) return [];
+  const out = [];
+  let off = headerSize;
+  const cmdsEnd = headerSize + sizeofcmds;
+  for (let i = 0; i < ncmds && off + 8 <= cmdsEnd; i++) {
+    const cmd = u32(view, off, le);
+    const cmdsize = u32(view, off + 4, le);
+    if (cmdsize < 8 || off + cmdsize > cmdsEnd) break;
+    if (cmd === LC_SEGMENT || cmd === LC_SEGMENT_64) {
+      const seg64 = cmd === LC_SEGMENT_64;
+      const sectOff = off + (seg64 ? 72 : 56);
+      const nsects = u32(view, off + (seg64 ? 64 : 48), le);
+      const sectSize = seg64 ? 80 : 68;
+      for (let s = 0; s < nsects; s++) {
+        const so = sectOff + s * sectSize;
+        if (so + sectSize > off + cmdsize) break;
+        const sectname = cstr16(view, so);
+        const segname = cstr16(view, so + 16);
+        if (segname !== "__TEXT" || sectname !== "__objc_methname") continue;
+        const size = seg64 ? u64(view, so + 40, le) : u32(view, so + 36, le);
+        const fileoff = seg64 ? u32(view, so + 48, le) : u32(view, so + 40, le);
+        if (size <= 0 || fileoff < 0 || fileoff + size > view.length) continue;
+        out.push(...splitCStrings(view.subarray(fileoff, fileoff + size)));
+      }
+    }
+    off += cmdsize;
+  }
+  return out;
+}
+function parseFat(buf) {
+  if (buf.length < 8) return [];
+  const magic = u32(buf, 0, false);
+  let le;
+  let is64;
+  if (magic === FAT_MAGIC) {
+    le = false;
+    is64 = false;
+  } else if (magic === FAT_CIGAM) {
+    le = true;
+    is64 = false;
+  } else if (magic === FAT_MAGIC_64) {
+    le = false;
+    is64 = true;
+  } else if (magic === FAT_CIGAM_64) {
+    le = true;
+    is64 = true;
+  } else {
+    return [];
+  }
+  const nfat = u32(buf, 4, le);
+  if (nfat <= 0 || nfat > 32) return [];
+  const entrySize = is64 ? 32 : 20;
+  const out = [];
+  for (let i = 0; i < nfat; i++) {
+    const eo = 8 + i * entrySize;
+    if (eo + entrySize > buf.length) break;
+    const offset = is64 ? u64(buf, eo + 8, le) : u32(buf, eo + 8, le);
+    const size = is64 ? u64(buf, eo + 16, le) : u32(buf, eo + 12, le);
+    if (offset < 0 || size <= 0 || offset + size > buf.length) continue;
+    out.push(...parseThin(buf, offset, offset + size));
+  }
+  return out;
+}
+function extractObjcMethnames(buf) {
+  if (buf.length < 4) return [];
+  try {
+    const magic = u32(buf, 0, false);
+    if (magic === FAT_MAGIC || magic === FAT_CIGAM || magic === FAT_MAGIC_64 || magic === FAT_CIGAM_64) {
+      return parseFat(buf);
+    }
+    return parseThin(buf, 0, buf.length);
+  } catch {
+    return [];
+  }
+}
+function extractObjcMethnamesFromFile(file) {
+  let fd;
+  try {
+    fd = (0, import_node_fs4.openSync)(file, "r");
+    const size = (0, import_node_fs4.fstatSync)(fd).size;
+    if (size <= 0 || size > 2147483647) return [];
+    const buf = Buffer.alloc(size);
+    let read = 0;
+    while (read < size) {
+      const n = (0, import_node_fs4.readSync)(fd, buf, read, size - read, read);
+      if (n <= 0) break;
+      read += n;
+    }
+    return extractObjcMethnames(buf.subarray(0, read));
+  } catch {
+    return [];
+  } finally {
+    if (fd !== void 0) (0, import_node_fs4.closeSync)(fd);
+  }
+}
+
 // src/strings.ts
 var import_node_child_process = require("node:child_process");
-var import_node_fs4 = require("node:fs");
+var import_node_fs5 = require("node:fs");
 var cached;
 function hasCommand(cmd, args) {
   const r = (0, import_node_child_process.spawnSync)(cmd, args, { stdio: "ignore", timeout: 5e3 });
@@ -11636,7 +11800,7 @@ function stringsOf(file, tools) {
     });
     if (!r.error && r.status === 0) return { text: r.stdout, via: "strings" };
   }
-  return { text: extractStrings((0, import_node_fs4.readFileSync)(file)).join("\n"), via: "builtin-strings" };
+  return { text: extractStrings((0, import_node_fs5.readFileSync)(file)).join("\n"), via: "builtin-strings" };
 }
 function nmOf(file, tools) {
   if (!tools.nm) return null;
@@ -11647,6 +11811,18 @@ function nmOf(file, tools) {
   });
   if (r.error || r.status !== 0 || !r.stdout.trim()) return null;
   return r.stdout;
+}
+function parseNmUndefined(text) {
+  const out = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(?:[0-9a-fA-F]+\s+)?([A-Za-z])\s+(\S+)$/);
+    if (!m) continue;
+    const type = m[1];
+    if (type === "U" || type === "w") out.push(m[2]);
+  }
+  return out;
 }
 var MACHO_MAGICS = /* @__PURE__ */ new Set([
   "feedface",
@@ -11669,15 +11845,15 @@ var MACHO_MAGICS = /* @__PURE__ */ new Set([
 function hasMachOMagic(file) {
   let fd;
   try {
-    fd = (0, import_node_fs4.openSync)(file, "r");
+    fd = (0, import_node_fs5.openSync)(file, "r");
     const b = Buffer.alloc(4);
-    const n = (0, import_node_fs4.readSync)(fd, b, 0, 4, 0);
+    const n = (0, import_node_fs5.readSync)(fd, b, 0, 4, 0);
     if (n < 4) return false;
     return MACHO_MAGICS.has(b.toString("hex"));
   } catch {
     return false;
   } finally {
-    if (fd !== void 0) (0, import_node_fs4.closeSync)(fd);
+    if (fd !== void 0) (0, import_node_fs5.closeSync)(fd);
   }
 }
 
@@ -11741,6 +11917,25 @@ function recordHit(map, symbol, confidence, via, location) {
   if (!h.via.includes(via)) h.via.push(via);
   if (location && !h.locations.includes(location)) h.locations.push(location);
   map.set(symbol, h);
+}
+function collectBinaryHits(map, location, matchers, src) {
+  if (src.nmUndefinedText !== null) {
+    for (const m of findSymbols(src.nmUndefinedText, matchers)) {
+      recordHit(map, m.symbol, m.confidence, "nm", location);
+    }
+    if (src.methnameText) {
+      for (const m of findSymbols(src.methnameText, matchers)) {
+        recordHit(map, m.symbol, m.confidence, "objc_methname", location);
+      }
+    }
+    for (const m of findSymbols(src.stringsText, matchers)) {
+      recordHit(map, m.symbol, "weak", src.stringsVia, location);
+    }
+    return;
+  }
+  for (const m of findSymbols(src.stringsText, matchers)) {
+    recordHit(map, m.symbol, m.confidence, src.stringsVia, location);
+  }
 }
 
 // src/bundle-scan.ts
@@ -11850,14 +12045,14 @@ function scanBundleRoot(root, display, tools) {
     }
     const hitMap = /* @__PURE__ */ new Map();
     for (const bin of b.binaries) {
-      const sources = [stringsOf(bin, tools)];
-      const nm = nmOf(bin, tools);
-      if (nm) sources.push({ text: nm, via: "nm" });
-      for (const src of sources) {
-        for (const m of findSymbols(src.text, matchers)) {
-          recordHit(hitMap, m.symbol, m.confidence, src.via, display(bin));
-        }
-      }
+      const str = stringsOf(bin, tools);
+      const nmText = nmOf(bin, tools);
+      collectBinaryHits(hitMap, display(bin), matchers, {
+        stringsText: str.text,
+        stringsVia: str.via,
+        nmUndefinedText: nmText !== null ? parseNmUndefined(nmText).join("\n") : null,
+        methnameText: nmText !== null ? extractObjcMethnamesFromFile(bin).join("\n") : ""
+      });
     }
     const hits = [...hitMap.values()];
     issues.push(...judge(target, b.main, b.rootManifests.length > 0, hits, declared, b.kind));
@@ -11950,7 +12145,7 @@ function judge(target, main, hasManifest, hits, declared, kind) {
 }
 
 // src/project-scan.ts
-var import_node_fs5 = require("node:fs");
+var import_node_fs6 = require("node:fs");
 var import_node_path4 = require("node:path");
 var SOURCE_EXT = /* @__PURE__ */ new Set([".swift", ".m", ".mm", ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp"]);
 var SKIP_DIRS2 = /* @__PURE__ */ new Set([".git", "node_modules", "DerivedData", "build", ".build", ".swiftpm"]);
@@ -11962,13 +12157,13 @@ function isUnitRoot(dir, root) {
   if (dir === root) return true;
   let names;
   try {
-    names = (0, import_node_fs5.readdirSync)(dir);
+    names = (0, import_node_fs6.readdirSync)(dir);
   } catch {
     return false;
   }
   if (names.some((n) => n === "Package.swift" || n.endsWith(".podspec") || n.endsWith(".xcodeproj"))) return true;
   const parent = (0, import_node_path4.dirname)(dir);
-  return (0, import_node_path4.basename)(parent) === "Sources" && (0, import_node_fs5.existsSync)((0, import_node_path4.join)((0, import_node_path4.dirname)(parent), "Package.swift"));
+  return (0, import_node_path4.basename)(parent) === "Sources" && (0, import_node_fs6.existsSync)((0, import_node_path4.join)((0, import_node_path4.dirname)(parent), "Package.swift"));
 }
 function scanProject(root, display) {
   const { dirs, files } = walk(root, (name) => SKIP_DIRS2.has(name) || name.endsWith(".xcodeproj") || name.endsWith(".xcworkspace"));
@@ -12022,7 +12217,7 @@ function scanProject(root, display) {
     }
     const hitMap = /* @__PURE__ */ new Map();
     for (const src of unit.sources) {
-      const lines = (0, import_node_fs5.readFileSync)(src, "utf8").split(/\r?\n/);
+      const lines = (0, import_node_fs6.readFileSync)(src, "utf8").split(/\r?\n/);
       lines.forEach((line, idx) => {
         for (const m of findSymbols(line, matchers)) {
           recordHit(hitMap, m.symbol, "confirmed", "source", `${display(src)}:${idx + 1}`);
@@ -12052,10 +12247,10 @@ function pbxprojDuplicates(root, display) {
   for (const d of dirs) {
     if (!d.endsWith(".xcodeproj")) continue;
     const pbx = (0, import_node_path4.join)(d, "project.pbxproj");
-    if (!(0, import_node_fs5.existsSync)(pbx)) continue;
+    if (!(0, import_node_fs6.existsSync)(pbx)) continue;
     let objects;
     try {
-      objects = asObj(asObj(parseOpenStep((0, import_node_fs5.readFileSync)(pbx, "utf8")))?.["objects"]);
+      objects = asObj(asObj(parseOpenStep((0, import_node_fs6.readFileSync)(pbx, "utf8")))?.["objects"]);
     } catch {
       continue;
     }
@@ -12100,8 +12295,8 @@ function scan(inputPath, opts) {
   let manifests = [];
   let issues = [];
   if (opts.mode === "project") {
-    if (!(0, import_node_fs6.existsSync)(input)) throw new InputError(`\u30D1\u30B9\u304C\u3042\u308A\u307E\u305B\u3093: ${inputPath}`);
-    if (!(0, import_node_fs6.statSync)(input).isDirectory()) throw new InputError(`\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${inputPath}`);
+    if (!(0, import_node_fs7.existsSync)(input)) throw new InputError(`\u30D1\u30B9\u304C\u3042\u308A\u307E\u305B\u3093: ${inputPath}`);
+    if (!(0, import_node_fs7.statSync)(input).isDirectory()) throw new InputError(`\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${inputPath}`);
     ({ bundles, manifests, issues } = scanProject(input, (p) => (0, import_node_path5.relative)(input, p) || (0, import_node_path5.basename)(input)));
   } else {
     for (const root of resolveRoots(input)) {

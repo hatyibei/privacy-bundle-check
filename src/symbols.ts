@@ -92,3 +92,42 @@ export function recordHit(
   if (location && !h.locations.includes(location)) h.locations.push(location);
   map.set(symbol, h);
 }
+
+export interface BinaryHitSources {
+  stringsText: string;
+  stringsVia: string;
+  /** nm が成功したときは未定義記号を改行つなぎ。失敗・未使用は null（従来の strings 判定に退避）。 */
+  nmUndefinedText: string | null;
+  methnameText: string;
+}
+
+/**
+ * バイナリ 1 個分のヒットを hitMap に足す。
+ * nm が読めたときは、未定義記号（import）と __objc_methname のセレクタだけを
+ * カタログどおりの確定/参考のまま採用し、strings にしか無いものは weak に下げる。
+ * nm が失敗したときは従来どおり strings の判定を使う（見逃しを増やさない）。
+ */
+export function collectBinaryHits(
+  map: Map<string, SymbolHit>,
+  location: string,
+  matchers: Matcher[],
+  src: BinaryHitSources,
+): void {
+  if (src.nmUndefinedText !== null) {
+    for (const m of findSymbols(src.nmUndefinedText, matchers)) {
+      recordHit(map, m.symbol, m.confidence, "nm", location);
+    }
+    if (src.methnameText) {
+      for (const m of findSymbols(src.methnameText, matchers)) {
+        recordHit(map, m.symbol, m.confidence, "objc_methname", location);
+      }
+    }
+    for (const m of findSymbols(src.stringsText, matchers)) {
+      recordHit(map, m.symbol, "weak", src.stringsVia, location);
+    }
+    return;
+  }
+  for (const m of findSymbols(src.stringsText, matchers)) {
+    recordHit(map, m.symbol, m.confidence, src.stringsVia, location);
+  }
+}

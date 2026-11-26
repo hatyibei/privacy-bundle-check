@@ -141,6 +141,7 @@ Rules that follow from that official list:
 - `creationDate` and `modificationDate` are used only in `--mode project`. They are too short for a binary strings scan.
 - In a binary, `NSUserDefaults` is a confirmed hit; a bare `UserDefaults` is a weak hit (`possible_undeclared_api`, warning) because of Swift mangling and unrelated strings. In project mode, `UserDefaults` is confirmed.
 - Binary matches use identifier boundaries: `stat` does not match `status`, `statistics`, `os_stat`, or `stat_foo`. A leading `_` (`_stat`), suffixes such as `$INODE64` or `@plt`, and a Swift mangled length prefix (`12systemUptime`) are allowed.
+- When `nm` or `llvm-nm` can read the Mach-O, a confirmed hit must be an undefined symbol (import) such as `_stat`, `_stat$INODE64`, or `_OBJC_CLASS_$_NSUserDefaults`, or a selector in the `__TEXT,__objc_methname` section (`systemUptime`, `activeInputModes`, …). A strings-only match, or a defined symbol that is not imported, is recorded as a weak hit. If `nm` cannot read the file, the previous strings-based scan is used so detections are not dropped.
 
 ### Missing manifest and undeclared API
 
@@ -156,7 +157,7 @@ Apple's documentation also says that for each executable or dylib that uses a re
 
 ## Limits
 
-- On Linux, `nm` often cannot read a real Mach-O. The built-in strings extractor still runs. The checked-in fixtures are text stand-ins, not real Mach-O files.
+- On Linux, GNU `nm` often cannot read a real Mach-O. The built-in strings extractor still runs, and the scan falls back to the strings-based rules above. The checked-in fixtures are text stand-ins, not real Mach-O files.
 - A symbol that came from a linked system library cannot be reliably distinguished from a call the app itself makes.
 - `--mode project` can pick up comments and unused code.
 - Passing this tool is not a guarantee of App Store acceptance. Apple's own list of APIs and reasons can change; the catalog date is recorded in [docs/catalog.md](docs/catalog.md).

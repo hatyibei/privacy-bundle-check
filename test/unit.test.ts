@@ -2,8 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { buildBinary } from "plist";
-import { binaryMatchers, sourceMatchers, findSymbols } from "../src/symbols.ts";
-import { extractStrings } from "../src/strings.ts";
+import { binaryMatchers, sourceMatchers, findSymbols, collectBinaryHits } from "../src/symbols.ts";
+import { extractStrings, parseNmUndefined } from "../src/strings.ts";
+import { extractObjcMethnames } from "../src/macho.ts";
+import type { SymbolHit } from "../src/types.ts";
 import { validateManifest, parseManifestFile } from "../src/manifest.ts";
 import { CATALOG, REASON_TO_CATEGORY } from "../src/required-reason-apis.ts";
 import { scan } from "../src/scan.ts";
@@ -353,4 +355,143 @@ test("getattrlistbulk は FileTimestamp のみ（DiskSpace の宣言では足り
   });
   const r = scan(d, opts);
   assert.deepEqual(r.issues.map((i) => [i.type, i.category]), [["undeclared_api", C.ts]]);
+});
+
+
+// ---- nm 未定義記号 / objc_methname / 確定と参考の切り分け ----
+function hitsOf(src: Parameters<typeof collectBinaryHits>[3]): SymbolHit[] {
+  const map = new Map<string, SymbolHit>();
+  collectBinaryHits(map, "X.app/X", binaryMatchers(), src);
+  return [...map.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
+
+function macho64LeWithMethnames(names: string[]): Buffer {
+  const payload = Buffer.from(names.join("\0") + "\0");
+  const headerSize = 32;
+  const sizeofcmds = 72 + 80;
+  const dataOff = headerSize + sizeofcmds;
+  const buf = Buffer.alloc(dataOff + payload.length);
+  buf.writeUInt32LE(0xfeedfacf, 0);
+  buf.writeUInt32LE(0x0100000c, 4);
+  buf.writeUInt32LE(0, 8);
+  buf.writeUInt32LE(2, 12);
+  buf.writeUInt32LE(1, 16);
+  buf.writeUInt32LE(sizeofcmds, 20);
+  buf.writeUInt32LE(0, 24);
+  buf.writeUInt32LE(0, 28);
+  let o = 32;
+  buf.writeUInt32LE(0x19, o);
+  buf.writeUInt32LE(sizeofcmds, o + 4);
+  Buffer.from("__TEXT").copy(buf, o + 8);
+  buf.writeBigUInt64LE(0n, o + 24);
+  buf.writeBigUInt64LE(BigInt(payload.length), o + 32);
+  buf.writeBigUInt64LE(BigInt(dataOff), o + 40);
+  buf.writeBigUInt64LE(BigInt(payload.length), o + 48);
+  buf.writeInt32LE(7, o + 56);
+  buf.writeInt32LE(5, o + 60);
+  buf.writeUInt32LE(1, o + 64);
+  buf.writeUInt32LE(0, o + 68);
+  o = 32 + 72;
+  Buffer.from("__objc_methname").copy(buf, o);
+  Buffer.from("__TEXT").copy(buf, o + 16);
+  buf.writeBigUInt64LE(0n, o + 32);
+  buf.writeBigUInt64LE(BigInt(payload.length), o + 40);
+  buf.writeUInt32LE(dataOff, o + 48);
+  payload.copy(buf, dataOff);
+  return buf;
+}
+
+function fatWithThin(thin: Buffer): Buffer {
+  const align = 12; // 2^12 = 4096, typical
+  const offset = 4096;
+  const buf = Buffer.alloc(offset + thin.length);
+  buf.writeUInt32BE(0xcafebabe, 0);
+  buf.writeUInt32BE(1, 4);
+  buf.writeUInt32BE(0x0100000c, 8);
+  buf.writeUInt32BE(0, 12);
+  buf.writeUInt32BE(offset, 16);
+  buf.writeUInt32BE(thin.length, 20);
+  buf.writeUInt32BE(align, 24);
+  thin.copy(buf, offset);
+  return buf;
+}
+
+test("parseNmUndefined: 未定義だけを抜き、定義済み __fstat は入れない", () => {
+  const text = [
+    "                 U _stat",
+    "                 U _stat$INODE64",
+    "                 U _OBJC_CLASS_$_NSUserDefaults",
+    "                 U _OBJC_METACLASS_$_NSUserDefaults",
+    "                 w _fstatat",
+    "000000000001c088 d __fstat",
+    "0000000000001234 T _main",
+    "00000000000b0cb0 T __gcry_random_dump_stats",
+  ].join("\n");
+  assert.deepEqual(parseNmUndefined(text).sort(), [
+    "_OBJC_CLASS_$_NSUserDefaults",
+    "_OBJC_METACLASS_$_NSUserDefaults",
+    "_fstatat",
+    "_stat",
+    "_stat$INODE64",
+  ]);
+});
+
+test("extractObjcMethnames: 64-bit LE と fat から systemUptime を抜く", () => {
+  const thin = macho64LeWithMethnames(["init", "systemUptime", "activeInputModes"]);
+  assert.deepEqual(extractObjcMethnames(thin).sort(), ["activeInputModes", "init", "systemUptime"]);
+  assert.deepEqual(extractObjcMethnames(fatWithThin(thin)).sort(), ["activeInputModes", "init", "systemUptime"]);
+  assert.deepEqual(extractObjcMethnames(Buffer.from("FAKE\0systemUptime\0")), []);
+});
+
+test("nm 成功時: エラーメッセージの stat は weak、本物の _fstat import は confirmed", () => {
+  const hits = hitsOf({
+    stringsText: "can't stat `%s': %s\n_fstat\n",
+    stringsVia: "strings",
+    nmUndefinedText: "_fstat\n",
+    methnameText: "",
+  });
+  const by = Object.fromEntries(hits.map((h) => [h.symbol, h]));
+  assert.equal(by.fstat?.confidence, "confirmed");
+  assert.deepEqual(by.fstat?.via, ["nm", "strings"]);
+  assert.equal(by.stat?.confidence, "weak");
+  assert.deepEqual(by.stat?.via, ["strings"]);
+});
+
+test("nm 成功時: 定義済み static __fstat だけなら weak（libc の fstat ではない）", () => {
+  const hits = hitsOf({
+    stringsText: "__fstat\n",
+    stringsVia: "strings",
+    nmUndefinedText: "",
+    methnameText: "",
+  });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0]!.symbol, "fstat");
+  assert.equal(hits[0]!.confidence, "weak");
+  assert.deepEqual(hits[0]!.via, ["strings"]);
+});
+
+test("nm 成功時: systemUptime は methname から confirmed（nm に無くても落とさない）", () => {
+  const hits = hitsOf({
+    stringsText: "systemUptime\n",
+    stringsVia: "strings",
+    nmUndefinedText: "_stat\n_OBJC_CLASS_$_NSUserDefaults\n",
+    methnameText: "init\nsystemUptime\n",
+  });
+  const by = Object.fromEntries(hits.map((h) => [h.symbol, h]));
+  assert.equal(by.systemUptime?.confidence, "confirmed");
+  assert.ok(by.systemUptime?.via.includes("objc_methname"));
+  assert.equal(by.stat?.confidence, "confirmed");
+  assert.equal(by.NSUserDefaults?.confidence, "confirmed");
+});
+
+test("nm 失敗時: 従来どおり strings の stat は confirmed（見逃しを増やさない退避）", () => {
+  const hits = hitsOf({
+    stringsText: "can't stat `%s': %s\n",
+    stringsVia: "strings",
+    nmUndefinedText: null,
+    methnameText: "",
+  });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0]!.symbol, "stat");
+  assert.equal(hits[0]!.confidence, "confirmed");
 });
